@@ -1,0 +1,17 @@
+lint:
+  stage: lint
+  tags:
+    - dev
+  image: python:3.13-alpine
+  before_script:
+    - pip install flake8 black
+  script:
+    - flake8 --per-file-ignores="__init__.py:F401" --exclude="adapters/DMS/database/migrations/"
+    - black --check .
+  allow_failure: true
+  rules:
+    - if: >-
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+      when: always
+    - when: never

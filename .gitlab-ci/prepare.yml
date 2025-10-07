@@ -1,0 +1,35 @@
+prepare_dependencies:
+  stage: prepare
+  tags:
+    - dev
+  image: python:3.13-alpine
+  variables:
+    POETRY_VIRTUALENVS_IN_PROJECT: "true"
+  cache:
+    key:
+      files:
+        - poetry.lock
+      prefix: poetry-${CI_PROJECT_ID}
+    paths:
+      - .venv
+    policy: pull-push
+  artifacts:
+    paths:
+      - .venv
+    expire_in: 1 hour
+  before_script:
+    - apk add --no-cache gcc musl-dev linux-headers postgresql-dev
+    - pip install poetry
+  script:
+    - poetry install --no-root
+    - echo "Cleaning .venv to reduce artifact size..."
+    - find .venv -type f -name '*.pyc' -delete
+    - find .venv -type d -name '__pycache__' -exec rm -rf {} +
+    - echo "Checking final size of .venv directory before creating artifact:"
+    - du -sh .venv
+  rules:
+    - if: >-
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+      when: always
+    - when: never

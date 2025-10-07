@@ -1,0 +1,82 @@
+services:
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./secrets/staging:/etc/nginx/certs
+      - static_data:/backend-server/static
+    profiles:
+      - server
+    depends_on:
+      - backend-server
+
+  backend-server:
+    image: nexus.domain.com/backend-server:latest
+    build:
+      context: .
+      args:
+        - DEV=true
+    container_name: backend-server
+    hostname: backend-server-host
+    volumes:
+      - .:/backend-server
+      - static_data:/backend-server/static
+    profiles:
+      - server
+    command: >
+      sh -c "python manage.py collectstatic --noinput &&
+             python manage.py migrate &&
+             gunicorn --bind 0.0.0.0:8000 infrastructure.wsgi:application"
+    environment:
+      - TZ=Asia/Seoul
+      - DB_HOST=123.456.78.132
+      - DB_PORT=5233
+      - DB_NAME=db
+      - DB_USER=user
+      - DB_PASS=pw
+      - RABBITMQ_HOST=123.456.78.132
+      - RABBITMQ_PORT=15672
+      - RABBITMQ_VHOST=dev
+      - RABBITMQ_USER=user
+      - RABBITMQ_PASS=user_pw
+      - WATCHER_HOST=123.456.78.132
+      - WATCHER_PORT=19999
+      - MUSTER_USER=user
+      - MUSTER_PASS=user
+      - FTRACK_SERVER=https://dev-ftrack.some-where.com
+      - REQUESTS_CA_BUNDLE=/some_where/ftrack_cacert.pem
+    extra_hosts:
+      - 'dev-ftrack.some-where.com:333.111.222.28'
+      - 'rms.some-where.com:333.111.222.28'
+      - 'what.some-where.com:127.0.0.1'
+
+  platform-db:
+    image: postgres:17.4-alpine3.20
+    volumes:
+      - dev-db-data:/var/lib/postgresql/17/main
+      # Since this path must be mounted on a host labeled as db-server, an
+      # absolute path must be specified instead of a relative path.
+      # Otherwise, an "invalid mount config for type…" error will occur.
+      # - ./postgres-config:/var/lib/postgresql/data
+      # - ./postgres-initdb:/docker-entrypoint-initdb.d
+    container_name: platform-db
+    hostname: platform-db
+    profiles:
+      - db
+    environment:
+      - TZ=Asia/Seoul
+      - POSTGRES_DB=db
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pw
+    ports:
+      - '5233:5233'
+
+volumes:
+  dev-db-data:
+    driver: local
+  static_data:
+    driver: local

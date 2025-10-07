@@ -1,0 +1,47 @@
+# Django migrations
+# migrations
+
+# overscan parse pattern config
+infrastructure/configs/overscan_parse_pattern.yml
+
+# Python bytecode
+*.pyc
+__pycache__/
+
+# Virtual environment
+venv/
+.env
+
+# IDE specific
+.idea/
+.vscode/
+
+# Log files
+*.log
+logs
+
+# Localization/Internationalization (Common Django pattern)
+*.pot
+*.mo
+
+# Static and media files (Collected/generated during deployment)
+staticfiles/
+media/
+
+# Test results and coverage reports (pytest, coverage)
+*.coverage
+.coverage.*
+coverage.xml
+test-results/
+htmlcov/
+
+# macOS specific
+*.DS_Store
+
+# Windows specific
+Thumbs.db
+Desktop.ini
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb

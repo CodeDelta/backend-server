@@ -1,0 +1,174 @@
+.deploy_variables:
+  staging: &staging_vars
+    ENVIRONMENT_NAME: staging
+    STACK_NAME: backend-server-staging
+    DEPLOY_ROLE: sx-staging
+    NETWORK_NAME: platform-net-staging
+    APP_PORT: 12345
+    PORTS_MODE: ingress
+    NGINX_HTTP_PORT: 123
+    NGINX_HTTPS_PORT: 1234
+    SERVER_NAME: sxp.some-where.com
+    WATCHER_HOST: this-is-watcher
+    WATCHER_PORT: 11111
+    IMAGE_TAG: $CI_COMMIT_TAG
+    REPLICA_COUNT: 1
+    REMOTE_COMPOSE_DIR: /tmp/gitlab-ci-deploy-staging
+    SWARM_MANAGER_SSH: $SWARM_MANAGER_USER@$SWARM_MANAGER_IP
+    DB_SCHEMA: staging
+  production: &production_vars
+    ENVIRONMENT_NAME: production
+    STACK_NAME: backend-server-production
+    DEPLOY_ROLE: vs-prod-platform
+    NETWORK_NAME: platform-net-production
+    APP_PORT: 67890
+    PORTS_MODE: ingress
+    NGINX_HTTP_PORT: 321
+    NGINX_HTTPS_PORT: 4321
+    SERVER_NAME: sxp.some-where.com
+    WATCHER_HOST: this-is-watcher
+    WATCHER_PORT: 22222
+    IMAGE_TAG: $CI_COMMIT_TAG
+    REPLICA_COUNT: 2
+    REMOTE_COMPOSE_DIR: /tmp/gitlab-ci-deploy-production
+    SWARM_MANAGER_SSH: $SWARM_MANAGER_USER@$SWARM_MANAGER_IP
+    DB_SCHEMA: production
+
+.deploy_to_swarm_template:
+  extends: .deploy_template
+  stage: deploy
+  environment:
+    name: $ENVIRONMENT_NAME
+  variables:
+    STACK_FILE_PATH: .gitlab-ci/services/stack.yml
+    NGINX_CONFIG_PATH: .gitlab-ci/services/nginx.conf
+  script:
+    - |
+      echo "📄 Generating stack.yml from template for $ENVIRONMENT_NAME"
+      sed -e "s|__REPLICA_COUNT__|${REPLICA_COUNT}|g" \
+          -e "s|__DEPLOY_ROLE__|${DEPLOY_ROLE}|g" \
+          -e "s|__NETWORK_NAME__|${NETWORK_NAME}|g" \
+          -e "s|__APP_PORT__|${APP_PORT}|g" \
+          -e "s|__DB_HOST__|${DB_HOST}|g" \
+          -e "s|__DB_PORT__|${DB_PORT}|g" \
+          -e "s|__DB_NAME__|${DB_NAME}|g" \
+          -e "s|__DB_USER__|${DB_USER}|g" \
+          -e "s|__DB_PASS__|${DB_PASS}|g" \
+          -e "s|__RABBITMQ_HOST__|${RABBITMQ_HOST}|g" \
+          -e "s|__RABBITMQ_PORT__|${RABBITMQ_PORT}|g" \
+          -e "s|__RABBITMQ_VHOST__|${RABBITMQ_VHOST}|g" \
+          -e "s|__RABBITMQ_USER__|${RABBITMQ_USER}|g" \
+          -e "s|__RABBITMQ_PASS__|${RABBITMQ_PASS}|g" \
+          -e "s|__MUSTER_USER__|${MUSTER_USER}|g" \
+          -e "s|__MUSTER_PASS__|${MUSTER_PASS}|g" \
+          -e "s|__WATCHER_HOST__|${WATCHER_HOST}|g" \
+          -e "s|__WATCHER_PORT__|${WATCHER_PORT}|g" \
+          -e "s|__FTRACK_API_KEY__|${FTRACK_API_KEY}|g" \
+          -e "s|__IMAGE_TAG__|$IMAGE_TAG|g" \
+          -e "s|__DB_SCHEMA__|${DB_SCHEMA}|g" \
+          -e "s|__NGINX_HTTP_PORT__|${NGINX_HTTP_PORT}|g" \
+          -e "s|__NGINX_HTTPS_PORT__|${NGINX_HTTPS_PORT}|g" \
+          -e "s|__PORTS_MODE__|${PORTS_MODE}|g" \
+          -e "s|__ENVIRONMENT_NAME__|${ENVIRONMENT_NAME}|g" \
+          ".gitlab-ci/services/stack.template.yml" > "${STACK_FILE_PATH}"
+    - |
+      echo "📄 Generating nginx.conf from template for $ENVIRONMENT_NAME"
+      sed -e "s|__SERVER_NAME__|${SERVER_NAME}|g" \
+          -e "s|__APP_PORT__|${APP_PORT}|g" \
+          -e "s|__NGINX_HTTP_PORT__|${NGINX_HTTP_PORT}|g" \
+          -e "s|__NGINX_HTTPS_PORT__|${NGINX_HTTPS_PORT}|g" \
+          ".gitlab-ci/services/nginx.template.conf" > "${NGINX_CONFIG_PATH}"
+    - |
+      echo "🖥️ Preparing remote directory on swarm manager"
+      ssh $SWARM_MANAGER_SSH "mkdir -p $REMOTE_COMPOSE_DIR"
+    - |
+      echo "📄 Copying files to remote host for $ENVIRONMENT_NAME"
+      scp "${STACK_FILE_PATH}" \
+          "${NGINX_CONFIG_PATH}" \
+          "$TLS_CERT" \
+          "$TLS_KEY" \
+          "$DMS_CACERT" \
+          "$SWARM_MANAGER_SSH:$REMOTE_COMPOSE_DIR/"
+    - |
+      ssh $SWARM_MANAGER_SSH /bin/bash <<EOF
+      set -e
+      echo "🖥️ Preparing remote host on \$(hostname)"
+
+      if ! docker secret inspect tls_cert >/dev/null 2>&1; then
+        echo "🔑 Creating secret: tls_cert"
+        docker secret create tls_cert $REMOTE_COMPOSE_DIR/$(basename $TLS_CERT)
+      else
+        echo "🔑 Secret 'tls_cert' already exists. Skipping creation."
+      fi
+
+      if ! docker secret inspect tls_key >/dev/null 2>&1; then
+        echo "🔑 Creating secret: tls_key"
+        docker secret create tls_key $REMOTE_COMPOSE_DIR/$(basename $TLS_KEY)
+      else
+        echo "🔑 Secret 'tls_key' already exists. Skipping creation."
+      fi
+
+      if ! docker secret inspect dms_cacert >/dev/null 2>&1; then
+        echo "🔑 Creating secret: dms_cacert"
+        docker secret create dms_cacert $REMOTE_COMPOSE_DIR/$(basename $DMS_CACERT)
+      else
+        echo "🔑 Secret 'dms_cacert' already exists. Skipping creation."
+      fi
+
+      echo "🐛 Logging into Nexus on swarm manager..."
+      echo $NEXUS_PW | docker login -u $NEXUS_USER --password-stdin $NEXUS_URL
+
+      echo "🌐 Checking for overlay network..."
+      if ! docker network ls --format '{{.Name}}' | grep -q "^${NETWORK_NAME}$"; then
+        echo "🔗 Creating overlay network: ${NETWORK_NAME}"
+        docker network create --driver=overlay "${NETWORK_NAME}"
+      else
+        echo "✅ Overlay network ${NETWORK_NAME} already exists."
+      fi
+
+      echo "📦 Deploying Docker stack: $STACK_NAME to $ENVIRONMENT_NAME"
+      docker stack deploy \
+        -c "$REMOTE_COMPOSE_DIR/stack.yml" \
+        --with-registry-auth \
+        "$STACK_NAME"
+
+      echo "🧹 Cleaning up remote directory"
+      rm -rf "\$REMOTE_COMPOSE_DIR"
+      echo "✅ Deployment complete"
+      EOF
+
+deploy_to_staging:
+  extends: .deploy_to_swarm_template
+  variables:
+    <<: *staging_vars
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /beta/'
+
+manual_deploy_to_staging:
+  extends: .deploy_to_swarm_template
+  variables:
+    <<: *staging_vars
+    IMAGE_TAG: $IMAGE_TAG
+  rules:
+    - if: '$DEPLOY_MANUAL == "staging"'
+      when: manual
+    - when: never
+  allow_failure: true
+
+deploy_to_production:
+  extends: .deploy_to_swarm_template
+  variables:
+    <<: *production_vars
+  rules:
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /beta/'
+
+manual_deploy_to_production:
+  extends: .deploy_to_swarm_template
+  variables:
+    <<: *production_vars
+    IMAGE_TAG: $IMAGE_TAG
+  rules:
+    - if: '$DEPLOY_MANUAL == "production"'
+      when: manual
+    - when: never
+  allow_failure: true

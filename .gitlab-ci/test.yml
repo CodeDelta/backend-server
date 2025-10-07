@@ -1,0 +1,24 @@
+test_broll:
+  extends: .test_template
+  script:
+    - ./.venv/bin/python manage.py test tests.DMS.integration.broll
+
+test_setdata:
+  extends: .test_template
+  script:
+    - ./.venv/bin/python manage.py test tests.DMS.integration.setdata
+
+test_longplay:
+  extends: .test_template
+  script:
+    - ./.venv/bin/python manage.py test tests.DMS.integration.longplay
+
+test_overscan:
+  extends: .test_template
+  script:
+    - ./.venv/bin/python manage.py test tests.DMS.integration.overscan
+
+test_plate:
+  extends: .test_template
+  script:
+    - ./.venv/bin/python manage.py test tests.DMS.integration.plate

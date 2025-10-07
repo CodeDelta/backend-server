@@ -1,0 +1,24 @@
+build:
+  stage: build
+  tags:
+    - dev
+  image: docker:28
+  variables:
+    IMAGE_TAG: $CI_COMMIT_TAG
+    DOCKER_IMAGE: nexus.domain.com/backend-server
+  needs:
+    - job: semantic_release
+      optional: true
+  script:
+    - echo "🐳Building docker image with tag $IMAGE_TAG"
+    - docker build --tag $DOCKER_IMAGE:$IMAGE_TAG --tag $DOCKER_IMAGE:latest .
+    - echo $NEXUS_PW | docker login -u $NEXUS_USER --password-stdin $NEXUS_URL
+    - echo "🐳Pushing docker image to Nexus"
+    - docker push $DOCKER_IMAGE:$IMAGE_TAG
+    - docker push $DOCKER_IMAGE:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$CI_COMMIT_TAG'
+      when: on_success
+    - when: never

@@ -1,0 +1,110 @@
+services:
+  nginx:
+    image: nexus.domain.com/nginx:latest
+    ports:
+      - target: __NGINX_HTTP_PORT__
+        published: __NGINX_HTTP_PORT__
+        mode: __PORTS_MODE__
+      - target: __NGINX_HTTPS_PORT__
+        published: __NGINX_HTTPS_PORT__
+        mode: __PORTS_MODE__
+    networks:
+      - __NETWORK_NAME__
+    volumes:
+      - static_data:/backend-server/static:ro
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/nginx.conf
+    secrets:
+      - source: tls_cert
+        target: /etc/nginx/certs/fullchain.pem
+      - source: tls_key
+        target: /etc/nginx/certs/private.pem
+    deploy:
+      replicas: __REPLICA_COUNT__
+      placement:
+        constraints:
+          - node.labels.role == __DEPLOY_ROLE__
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+
+  backend-server:
+    image: nexus.domain.com/backend-server:__IMAGE_TAG__
+    command: >
+      sh -c "python manage.py collectstatic --noinput &&
+             python manage.py migrate &&
+             gunicorn --bind 0.0.0.0:__APP_PORT__ infrastructure.wsgi:application"
+    environment:
+      - TZ=Asia/Seoul
+      - REQUESTS_CA_BUNDLE=/run/secrets/dms_cacert
+      - DB_HOST=__DB_HOST__
+      - DB_PORT=__DB_PORT__
+      - DB_NAME=__DB_NAME__
+      - DB_USER=__DB_USER__
+      - DB_PASS=__DB_PASS__
+      - RABBITMQ_HOST=__RABBITMQ_HOST__
+      - RABBITMQ_PORT=__RABBITMQ_PORT__
+      - RABBITMQ_VHOST=__RABBITMQ_VHOST__
+      - RABBITMQ_USER=__RABBITMQ_USER__
+      - RABBITMQ_PASS=__RABBITMQ_PASS__
+      - MUSTER_USER=__MUSTER_USER__
+      - MUSTER_PASS=__MUSTER_PASS__
+      - WATCHER_HOST=__WATCHER_HOST__
+      - WATCHER_PORT=__WATCHER_PORT__
+      - FTRACK_API_KEY=__FTRACK_API_KEY__
+      - SECURE_PROXY_SSL_HEADER_NAME=HTTP_X_FORWARDED_PROTO
+      - SECURE_PROXY_SSL_HEADER_VALUE=https
+      - DB_SCHEMA=__DB_SCHEMA__
+      - SERVICE_ENVIRONMENT=__ENVIRONMENT_NAME__
+      - SERVICE_VERSION=__IMAGE_TAG__
+    extra_hosts:
+      - 'ftrack.some-where.com:12.34.56.789'
+      - 'muster.some-where.com:12.34.56.789'
+    networks:
+      - __NETWORK_NAME__
+    volumes:
+      - static_data:/backend-server/static
+    secrets:
+      - dms_cacert
+    deploy:
+      replicas: __REPLICA_COUNT__
+      placement:
+        constraints:
+          - node.labels.role == __DEPLOY_ROLE__
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+
+networks:
+  __NETWORK_NAME__:
+    name: __NETWORK_NAME__
+    external: true
+
+secrets:
+  dms_cacert:
+    external: true
+  tls_cert:
+    external: true
+  tls_key:
+    external: true
+
+configs:
+  nginx_conf:
+    file: ./nginx.conf
+
+volumes:
+  static_data:
+    driver: local
